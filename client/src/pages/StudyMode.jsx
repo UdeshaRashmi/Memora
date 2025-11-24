@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useDeck } from '../context/DeckContext';
 import { useProgress } from '../context/ProgressContext';
@@ -17,6 +17,68 @@ const StudyMode = () => {
   const [loading, setLoading] = useState(true);
   const [cardStates, setCardStates] = useState({});
   const [showStats, setShowStats] = useState(false);
+
+  const cards = useMemo(() => deck?.cards || [], [deck]);
+  const currentCard = useMemo(() => cards[currentIndex], [cards, currentIndex]);
+
+  const getCardStats = () => {
+    const known = Object.values(cardStates).filter(v => v === 'known').length;
+    const review = Object.values(cardStates).filter(v => v === 'review').length;
+    return { known, review, unmarked: cards.length - known - review };
+  };
+
+  const stats = getCardStats();
+
+  const handleNext = async () => {
+    if (currentIndex < cards.length - 1) {
+      setCurrentIndex(currentIndex + 1);
+    } else {
+      setCompleted(true);
+      const duration = Math.floor((Date.now() - startTime) / 60000);
+      await addStudySession({
+        deckId: deck?.id,
+        deckTitle: deck?.title,
+        cardsStudied: cards.length,
+        totalCards: cards.length,
+        duration,
+        completed: true
+      });
+    }
+  };
+
+  const handlePrevious = () => {
+    if (currentIndex > 0) {
+      setCurrentIndex(currentIndex - 1);
+    }
+  };
+
+  const markCardAsKnown = () => {
+    if (currentCard) {
+      setCardStates(prev => ({ ...prev, [currentCard.id]: 'known' }));
+      if (currentIndex < cards.length - 1) {
+        setCurrentIndex(currentIndex + 1);
+      }
+    }
+  };
+
+  const markCardForReview = () => {
+    if (currentCard) {
+      setCardStates(prev => ({ ...prev, [currentCard.id]: 'review' }));
+      if (currentIndex < cards.length - 1) {
+        setCurrentIndex(currentIndex + 1);
+      }
+    }
+  };
+
+  const handleRestart = () => {
+    setCurrentIndex(0);
+    setCompleted(false);
+    const initialStates = {};
+    cards.forEach(card => {
+      initialStates[card.id] = null;
+    });
+    setCardStates(initialStates);
+  };
 
   useEffect(() => {
     const loadDeck = async () => {
@@ -49,7 +111,24 @@ const StudyMode = () => {
 
     window.addEventListener('keydown', handleKeyPress);
     return () => window.removeEventListener('keydown', handleKeyPress);
-  }, [currentIndex, completed]);
+  }, [completed, currentIndex, currentCard]);
+
+  useEffect(() => {
+    // Record study session when component unmounts
+    return () => {
+      if (currentIndex > 0) {
+        const duration = Math.floor((Date.now() - startTime) / 60000);
+        addStudySession({
+          deckId: deck?.id,
+          deckTitle: deck?.title,
+          cardsStudied: currentIndex + 1,
+          totalCards: deck?.cards?.length || 0,
+          duration,
+          completed
+        });
+      }
+    };
+  }, [currentIndex, startTime, deck, completed, addStudySession]);
 
   if (loading) {
     return (
@@ -80,83 +159,6 @@ const StudyMode = () => {
       </div>
     );
   }
-
-  const cards = deck.cards || [];
-  const currentCard = cards[currentIndex];
-
-  useEffect(() => {
-    // Record study session when component unmounts
-    return () => {
-      if (currentIndex > 0) {
-        const duration = Math.floor((Date.now() - startTime) / 60000); // in minutes
-        addStudySession({
-          deckId: deck.id,
-          deckTitle: deck.title,
-          cardsStudied: currentIndex + 1,
-          totalCards: cards.length,
-          duration,
-          completed
-        });
-      }
-    };
-  }, [currentIndex, startTime, deck, cards.length, completed, addStudySession]);
-
-  const handleNext = async () => {
-    if (currentIndex < cards.length - 1) {
-      setCurrentIndex(currentIndex + 1);
-    } else {
-      setCompleted(true);
-      const duration = Math.floor((Date.now() - startTime) / 60000);
-      await addStudySession({
-        deckId: deck.id,
-        deckTitle: deck.title,
-        cardsStudied: cards.length,
-        totalCards: cards.length,
-        duration,
-        completed: true
-      });
-    }
-  };
-
-  const handlePrevious = () => {
-    if (currentIndex > 0) {
-      setCurrentIndex(currentIndex - 1);
-    }
-  };
-
-  const handleRestart = () => {
-    setCurrentIndex(0);
-    setCompleted(false);
-    const initialStates = {};
-    cards.forEach(card => {
-      initialStates[card.id] = null;
-    });
-    setCardStates(initialStates);
-  };
-
-  const markCardAsKnown = () => {
-    if (currentCard) {
-      setCardStates(prev => ({ ...prev, [currentCard.id]: 'known' }));
-      if (currentIndex < cards.length - 1) {
-        setCurrentIndex(currentIndex + 1);
-      }
-    }
-  };
-
-  const markCardForReview = () => {
-    if (currentCard) {
-      setCardStates(prev => ({ ...prev, [currentCard.id]: 'review' }));
-      if (currentIndex < cards.length - 1) {
-        setCurrentIndex(currentIndex + 1);
-      }
-    }
-  };
-
-  const getCardStats = () => {
-    const known = Object.values(cardStates).filter(v => v === 'known').length;
-    const review = Object.values(cardStates).filter(v => v === 'review').length;
-    return { known, review, unmarked: cards.length - known - review };
-  };
 
   if (completed) {
     const duration = Math.floor((Date.now() - startTime) / 60000);
@@ -218,7 +220,7 @@ const StudyMode = () => {
   }
 
   const progress = (currentIndex / cards.length) * 100;
-  const stats = getCardStats();
+  
 
   return (
     <div className="study-mode min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 dark:from-gray-950 dark:via-gray-900 dark:to-gray-800">

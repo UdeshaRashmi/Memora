@@ -14,6 +14,20 @@ const Flashcard = ({ card }) => {
     setIsFlipped(!isFlipped);
   };
 
+  if (!card) {
+    return (
+      <div 
+        className="w-72 h-48 perspective-1000 cursor-pointer mx-auto my-4 transition-all duration-300 hover-lift"
+      >
+        <div className={`relative w-full h-full transition-transform duration-700 transform-style-3d`}>
+          <div className={`absolute w-full h-full backface-hidden gradient-secondary rounded-2xl shadow-2xl flex items-center justify-center p-6 flex-col`}>
+            <p className="text-white text-lg font-bold text-center leading-relaxed">Loading card...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div 
       className={`w-72 h-48 perspective-1000 cursor-pointer mx-auto my-4 transition-all duration-300 hover-lift`}
