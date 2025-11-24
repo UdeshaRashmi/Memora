@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useProgress } from '../context/ProgressContext';
+import { API_BASE } from '../config';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 
@@ -15,10 +16,12 @@ const Home = () => {
 
   const fetchRecentAchievements = async () => {
     try {
-      const response = await fetch('http://localhost:5000/api/achievements');
+      const response = await fetch(`${API_BASE}/achievements`);
       if (response.ok) {
         const data = await response.json();
-        setRecentAchievements(data.slice(0, 3));
+        // normalize _id -> id
+        const normalized = data.map(a => ({ ...a, id: a.id || a._id }));
+        setRecentAchievements(normalized.slice(0, 3));
       }
     } catch (error) {
       console.error('Error fetching achievements:', error);

@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useCallback } from 'react';
+import { API_BASE } from '../config';
 
 const ProgressContext = createContext();
 
@@ -19,7 +20,7 @@ export const ProgressProvider = ({ children }) => {
 
   const addStudySession = useCallback(async (session) => {
     try {
-      const response = await fetch('http://localhost:5000/api/study-session', {
+      const response = await fetch(`${API_BASE}/study-session`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -52,7 +53,7 @@ export const ProgressProvider = ({ children }) => {
 
   const loadUserStats = useCallback(async () => {
     try {
-      const response = await fetch('http://localhost:5000/api/user-stats');
+      const response = await fetch(`${API_BASE}/user-stats`);
       if (response.ok) {
         const stats = await response.json();
         setUserStats(prev => ({

@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { API_BASE } from '../config';
 
 const DeckContext = createContext();
-const API_BASE = 'http://localhost:5000/api';
 
 export const useDeck = () => {
   return useContext(DeckContext);

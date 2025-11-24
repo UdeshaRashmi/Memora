@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useProgress } from '../context/ProgressContext';
+import { API_BASE } from '../config';
 import Navbar from '../components/Navbar';
 
 const Leaderboard = () => {
@@ -18,10 +19,19 @@ const Leaderboard = () => {
 
   const fetchLeaderboardData = async () => {
     try {
-      const response = await fetch('http://localhost:5000/api/leaderboard');
+      const response = await fetch(`${API_BASE}/leaderboard`);
       if (response.ok) {
         const data = await response.json();
-        setLeaderboardData(data);
+        // backend returns entries like { user_id, points, achievements_count, rank }
+        const normalized = data.map((entry, idx) => ({
+          user_id: entry.user_id || entry._id || entry.id,
+          name: entry.name || `User ${entry.user_id || entry._id || idx + 1}`,
+          points: entry.points || 0,
+          achievements_count: entry.achievements_count || 0,
+          total_study_time: entry.total_study_time || 0,
+          rank: entry.rank || idx + 1
+        }));
+        setLeaderboardData(normalized);
       }
     } catch (error) {
       console.error('Error fetching leaderboard:', error);
@@ -32,10 +42,11 @@ const Leaderboard = () => {
 
   const fetchUserAchievements = async () => {
     try {
-      const response = await fetch('http://localhost:5000/api/achievements');
+      const response = await fetch(`${API_BASE}/achievements`);
       if (response.ok) {
         const data = await response.json();
-        setUserAchievements(data);
+        const normalized = data.map(a => ({ ...a, id: a.id || a._id }));
+        setUserAchievements(normalized);
       }
     } catch (error) {
       console.error('Error fetching achievements:', error);
@@ -44,7 +55,7 @@ const Leaderboard = () => {
 
   const fetchUserStats = async () => {
     try {
-      const response = await fetch('http://localhost:5000/api/user-stats');
+      const response = await fetch(`${API_BASE}/user-stats`);
       if (response.ok) {
         const data = await response.json();
         setUserStats(data);
