@@ -1,51 +1,40 @@
-const { pool } = require('../models/database');
+const { Achievement, StudySession, Deck, Card } = require('../models/database');
 
 const ACHIEVEMENT_TYPES = {
   FIRST_DECK: { type: 'first_deck', title: '🎯 First Steps', description: 'Create your first deck', icon: '🎯', points: 10 },
-  FIVE_CARDS: { type: 'five_cards', title: '📚 Growing Library', description: 'Add 5 cards to a deck', icon: '📚', points: 15 },
-  STUDY_STREAK_3: { type: 'study_streak_3', title: '🔥 On Fire', description: 'Study for 3 consecutive days', icon: '🔥', points: 25 },
-  STUDY_STREAK_7: { type: 'study_streak_7', title: '⚡ Unstoppable', description: 'Study for 7 consecutive days', icon: '⚡', points: 50 },
-  HUNDRED_CARDS: { type: 'hundred_cards', title: '💯 Century Club', description: 'Study 100 cards', icon: '💯', points: 40 },
   FIRST_SESSION: { type: 'first_session', title: '🚀 Getting Started', description: 'Complete your first study session', icon: '🚀', points: 20 },
   TEN_SESSIONS: { type: 'ten_sessions', title: '👨‍🎓 Dedicated Learner', description: 'Complete 10 study sessions', icon: '👨‍🎓', points: 30 },
+  HUNDRED_CARDS: { type: 'hundred_cards', title: '💯 Century Club', description: 'Study 100 cards', icon: '💯', points: 40 },
   HOUR_STUDY: { type: 'hour_study', title: '⏰ Time Keeper', description: 'Study for 60 minutes total', icon: '⏰', points: 35 },
   PERFECT_SESSION: { type: 'perfect_session', title: '🏆 Perfect Score', description: 'Complete a session with 100% accuracy', icon: '🏆', points: 45 }
 };
 
 exports.addStudySession = async (req, res) => {
   const { deck_id, cards_studied, total_cards, duration, completed } = req.body;
-  const userId = req.userId;
+  const userId = req.userId || 1;
 
   try {
-    const [result] = await pool.query(
-      'INSERT INTO study_sessions (user_id, deck_id, cards_studied, total_cards, duration, completed) VALUES (?, ?, ?, ?, ?, ?)',
-      [userId, deck_id, cards_studied, total_cards, duration, completed || false]
-    );
+    const session = new StudySession({ user_id: userId, deck_id, cards_studied, total_cards, duration, completed: completed || false });
+    await session.save();
 
-    const sessionId = result.insertId;
-    
     await checkAndAwardAchievements(userId, {
-      sessionId,
+      sessionId: session._id,
       cardsStudied: cards_studied,
       totalCards: total_cards,
       duration,
       completed
     });
 
-    res.status(201).json({ id: sessionId, user_id: userId, deck_id, cards_studied, total_cards, duration, completed });
+    res.status(201).json(session);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
 exports.getUserAchievements = async (req, res) => {
-  const userId = req.userId;
-
+  const userId = req.userId || 1;
   try {
-    const [achievements] = await pool.query(
-      'SELECT * FROM achievements WHERE user_id = ? ORDER BY unlocked_at DESC',
-      [userId]
-    );
+    const achievements = await Achievement.find({ user_id: userId }).sort({ unlocked_at: -1 });
     res.json(achievements);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -53,31 +42,29 @@ exports.getUserAchievements = async (req, res) => {
 };
 
 exports.getUserStats = async (req, res) => {
-  const userId = req.userId;
-
+  const userId = req.userId || 1;
   try {
-    const [sessions] = await pool.query(
-      'SELECT SUM(duration) as total_minutes, COUNT(*) as total_sessions, SUM(cards_studied) as total_cards_studied FROM study_sessions WHERE user_id = ?',
-      [userId]
-    );
+    const sessionsAgg = await StudySession.aggregate([
+      { $match: { user_id: userId } },
+      { $group: { _id: null, total_minutes: { $sum: '$duration' }, total_sessions: { $sum: 1 }, total_cards_studied: { $sum: '$cards_studied' } } }
+    ]);
 
-    const [deckCount] = await pool.query(
-      'SELECT COUNT(*) as count FROM decks WHERE user_id = ?',
-      [userId]
-    );
+    const deckCount = await Deck.countDocuments({ user_id: userId });
+    const achievementsAgg = await Achievement.aggregate([
+      { $match: { user_id: userId } },
+      { $group: { _id: null, count: { $sum: 1 }, total_points: { $sum: '$points' } } }
+    ]);
 
-    const [achievements] = await pool.query(
-      'SELECT COUNT(*) as count, SUM(points) as total_points FROM achievements WHERE user_id = ?',
-      [userId]
-    );
+    const s = sessionsAgg[0] || { total_minutes: 0, total_sessions: 0, total_cards_studied: 0 };
+    const a = achievementsAgg[0] || { count: 0, total_points: 0 };
 
     const stats = {
-      total_study_time: sessions[0].total_minutes || 0,
-      total_sessions: sessions[0].total_sessions || 0,
-      total_cards_studied: sessions[0].total_cards_studied || 0,
-      total_decks: deckCount[0].count || 0,
-      achievements_unlocked: achievements[0].count || 0,
-      total_points: achievements[0].total_points || 0
+      total_study_time: s.total_minutes || 0,
+      total_sessions: s.total_sessions || 0,
+      total_cards_studied: s.total_cards_studied || 0,
+      total_decks: deckCount || 0,
+      achievements_unlocked: a.count || 0,
+      total_points: a.total_points || 0
     };
 
     res.json(stats);
@@ -88,27 +75,15 @@ exports.getUserStats = async (req, res) => {
 
 exports.getLeaderboard = async (req, res) => {
   try {
-    const [leaderboard] = await pool.query(`
-      SELECT 
-        u.id,
-        COALESCE(u.email, CONCAT('User ', u.id)) as name,
-        COALESCE(SUM(a.points), 0) as points,
-        COUNT(DISTINCT a.id) as achievements_count,
-        COALESCE(SUM(ss.duration), 0) as total_study_time
-      FROM (SELECT DISTINCT user_id as id FROM decks UNION SELECT DISTINCT user_id as id FROM study_sessions UNION SELECT DISTINCT user_id FROM achievements) u
-      LEFT JOIN achievements a ON u.id = a.user_id
-      LEFT JOIN study_sessions ss ON u.id = ss.user_id
-      GROUP BY u.id
-      ORDER BY points DESC, achievements_count DESC
-      LIMIT 50
-    `);
+    // Basic leaderboard aggregated by points
+    const leaderboard = await Achievement.aggregate([
+      { $group: { _id: '$user_id', points: { $sum: '$points' }, achievements_count: { $sum: 1 } } },
+      { $sort: { points: -1, achievements_count: -1 } },
+      { $limit: 50 }
+    ]);
 
-    const rankedLeaderboard = leaderboard.map((entry, index) => ({
-      ...entry,
-      rank: index + 1
-    }));
-
-    res.json(rankedLeaderboard);
+    const ranked = leaderboard.map((entry, index) => ({ user_id: entry._id, points: entry.points, achievements_count: entry.achievements_count, rank: index + 1 }));
+    res.json(ranked);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -116,10 +91,7 @@ exports.getLeaderboard = async (req, res) => {
 
 async function checkAndAwardAchievements(userId, sessionData) {
   try {
-    const [existingAchievements] = await pool.query(
-      'SELECT achievement_type FROM achievements WHERE user_id = ?',
-      [userId]
-    );
+    const existingAchievements = await Achievement.find({ user_id: userId });
     const unlockedTypes = existingAchievements.map(a => a.achievement_type);
 
     const achievementsToAward = [];
@@ -128,27 +100,26 @@ async function checkAndAwardAchievements(userId, sessionData) {
       achievementsToAward.push(ACHIEVEMENT_TYPES.FIRST_SESSION);
     }
 
-    const [sessions] = await pool.query(
-      'SELECT COUNT(*) as count FROM study_sessions WHERE user_id = ?',
-      [userId]
-    );
-    if (!unlockedTypes.includes(ACHIEVEMENT_TYPES.TEN_SESSIONS.type) && sessions[0].count >= 10) {
+    const sessionsCount = await StudySession.countDocuments({ user_id: userId });
+    if (!unlockedTypes.includes(ACHIEVEMENT_TYPES.TEN_SESSIONS.type) && sessionsCount >= 10) {
       achievementsToAward.push(ACHIEVEMENT_TYPES.TEN_SESSIONS);
     }
 
-    const [cardsStudied] = await pool.query(
-      'SELECT SUM(cards_studied) as total FROM study_sessions WHERE user_id = ?',
-      [userId]
-    );
-    if (!unlockedTypes.includes(ACHIEVEMENT_TYPES.HUNDRED_CARDS.type) && cardsStudied[0].total >= 100) {
+    const cardsStudiedAgg = await StudySession.aggregate([
+      { $match: { user_id: userId } },
+      { $group: { _id: null, total: { $sum: '$cards_studied' } } }
+    ]);
+    const totalCards = (cardsStudiedAgg[0] && cardsStudiedAgg[0].total) || 0;
+    if (!unlockedTypes.includes(ACHIEVEMENT_TYPES.HUNDRED_CARDS.type) && totalCards >= 100) {
       achievementsToAward.push(ACHIEVEMENT_TYPES.HUNDRED_CARDS);
     }
 
-    const [studyTime] = await pool.query(
-      'SELECT SUM(duration) as total FROM study_sessions WHERE user_id = ?',
-      [userId]
-    );
-    if (!unlockedTypes.includes(ACHIEVEMENT_TYPES.HOUR_STUDY.type) && studyTime[0].total >= 60) {
+    const studyTimeAgg = await StudySession.aggregate([
+      { $match: { user_id: userId } },
+      { $group: { _id: null, total: { $sum: '$duration' } } }
+    ]);
+    const studyTime = (studyTimeAgg[0] && studyTimeAgg[0].total) || 0;
+    if (!unlockedTypes.includes(ACHIEVEMENT_TYPES.HOUR_STUDY.type) && studyTime >= 60) {
       achievementsToAward.push(ACHIEVEMENT_TYPES.HOUR_STUDY);
     }
 
@@ -159,10 +130,8 @@ async function checkAndAwardAchievements(userId, sessionData) {
     }
 
     for (const achievement of achievementsToAward) {
-      await pool.query(
-        'INSERT INTO achievements (user_id, achievement_type, title, description, icon, points) VALUES (?, ?, ?, ?, ?, ?)',
-        [userId, achievement.type, achievement.title, achievement.description, achievement.icon, achievement.points]
-      );
+      const a = new Achievement({ user_id: userId, achievement_type: achievement.type, title: achievement.title, description: achievement.description, icon: achievement.icon, points: achievement.points });
+      await a.save();
     }
   } catch (error) {
     console.error('Error checking and awarding achievements:', error);
@@ -171,16 +140,10 @@ async function checkAndAwardAchievements(userId, sessionData) {
 
 exports.awardFirstDeck = async (userId) => {
   try {
-    const [existing] = await pool.query(
-      'SELECT id FROM achievements WHERE user_id = ? AND achievement_type = ?',
-      [userId, ACHIEVEMENT_TYPES.FIRST_DECK.type]
-    );
-
-    if (existing.length === 0) {
-      await pool.query(
-        'INSERT INTO achievements (user_id, achievement_type, title, description, icon, points) VALUES (?, ?, ?, ?, ?, ?)',
-        [userId, ACHIEVEMENT_TYPES.FIRST_DECK.type, ACHIEVEMENT_TYPES.FIRST_DECK.title, ACHIEVEMENT_TYPES.FIRST_DECK.description, ACHIEVEMENT_TYPES.FIRST_DECK.icon, ACHIEVEMENT_TYPES.FIRST_DECK.points]
-      );
+    const existing = await Achievement.findOne({ user_id: userId, achievement_type: ACHIEVEMENT_TYPES.FIRST_DECK.type });
+    if (!existing) {
+      const a = new Achievement({ user_id, achievement_type: ACHIEVEMENT_TYPES.FIRST_DECK.type, title: ACHIEVEMENT_TYPES.FIRST_DECK.title, description: ACHIEVEMENT_TYPES.FIRST_DECK.description, icon: ACHIEVEMENT_TYPES.FIRST_DECK.icon, points: ACHIEVEMENT_TYPES.FIRST_DECK.points });
+      await a.save();
     }
   } catch (error) {
     console.error('Error awarding first deck achievement:', error);

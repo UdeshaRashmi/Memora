@@ -1,71 +1,66 @@
-const mysql = require('mysql2/promise');
+const mongoose = require('mongoose');
 require('dotenv').config();
 
-const pool = mysql.createPool({
-  host: process.env.DB_HOST,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0
-});
-
-const initializeDatabase = async () => {
-  const connection = await pool.getConnection();
-  try {
-    await connection.query(`
-      CREATE TABLE IF NOT EXISTS decks (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        title VARCHAR(255) NOT NULL,
-        description TEXT,
-        user_id INT NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-      )
-    `);
-
-    await connection.query(`
-      CREATE TABLE IF NOT EXISTS cards (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        deck_id INT NOT NULL,
-        front TEXT NOT NULL,
-        back TEXT NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        FOREIGN KEY (deck_id) REFERENCES decks(id) ON DELETE CASCADE
-      )
-    `);
-
-    await connection.query(`
-      CREATE TABLE IF NOT EXISTS study_sessions (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        user_id INT NOT NULL,
-        deck_id INT NOT NULL,
-        cards_studied INT NOT NULL,
-        total_cards INT NOT NULL,
-        duration INT NOT NULL,
-        completed BOOLEAN DEFAULT FALSE,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (deck_id) REFERENCES decks(id) ON DELETE CASCADE
-      )
-    `);
-
-    await connection.query(`
-      CREATE TABLE IF NOT EXISTS achievements (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        user_id INT NOT NULL,
-        achievement_type VARCHAR(50) NOT NULL,
-        title VARCHAR(255) NOT NULL,
-        description TEXT,
-        icon VARCHAR(50),
-        points INT DEFAULT 0,
-        unlocked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-  } finally {
-    connection.release();
+// Use MONGO_URI if provided, otherwise build from DB_HOST/DB_USER/DB_PASSWORD/DB_NAME
+const getMongoUri = () => {
+  if (process.env.MONGO_URI) return process.env.MONGO_URI;
+  const host = process.env.DB_HOST || 'localhost';
+  const user = process.env.DB_USER || '';
+  const pass = process.env.DB_PASSWORD || '';
+  const db = process.env.DB_NAME || 'memora';
+  if (user && pass) {
+    return `mongodb://${encodeURIComponent(user)}:${encodeURIComponent(pass)}@${host}/${db}?authSource=admin`;
   }
+  return `mongodb://${host}/${db}`;
 };
 
-module.exports = { pool, initializeDatabase };
+const mongoUri = getMongoUri();
+
+const initializeDatabase = async () => {
+  if (mongoose.connection.readyState === 1) return;
+  await mongoose.connect(mongoUri, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true
+  });
+};
+
+// Schemas
+const Schema = mongoose.Schema;
+
+const DeckSchema = new Schema({
+  title: { type: String, required: true },
+  description: { type: String, default: '' },
+  user_id: { type: Number, required: true },
+}, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
+
+const CardSchema = new Schema({
+  deck_id: { type: Schema.Types.ObjectId, ref: 'Deck', required: true },
+  front: { type: String, required: true },
+  back: { type: String, required: true },
+  difficulty: { type: String, default: 'medium' }
+}, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
+
+const StudySessionSchema = new Schema({
+  user_id: { type: Number, required: true },
+  deck_id: { type: Schema.Types.ObjectId, ref: 'Deck', required: true },
+  cards_studied: { type: Number, required: true },
+  total_cards: { type: Number, required: true },
+  duration: { type: Number, required: true },
+  completed: { type: Boolean, default: false }
+}, { timestamps: { createdAt: 'created_at' } });
+
+const AchievementSchema = new Schema({
+  user_id: { type: Number, required: true },
+  achievement_type: { type: String, required: true },
+  title: { type: String, required: true },
+  description: { type: String },
+  icon: { type: String },
+  points: { type: Number, default: 0 }
+}, { timestamps: { createdAt: 'unlocked_at' } });
+
+const Deck = mongoose.models.Deck || mongoose.model('Deck', DeckSchema);
+const Card = mongoose.models.Card || mongoose.model('Card', CardSchema);
+const StudySession = mongoose.models.StudySession || mongoose.model('StudySession', StudySessionSchema);
+const Achievement = mongoose.models.Achievement || mongoose.model('Achievement', AchievementSchema);
+
+module.exports = { initializeDatabase, Deck, Card, StudySession, Achievement, mongoose };

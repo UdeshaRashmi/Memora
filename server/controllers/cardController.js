@@ -1,32 +1,44 @@
-const { pool } = require('../models/database');
+const { Card, Deck } = require('../models/database');
 
 exports.getCardsByDeck = async (req, res) => {
   try {
-    const [cards] = await pool.query('SELECT * FROM cards WHERE deck_id = ?', [req.params.deckId]);
-    res.json(cards);
+    const cards = await Card.find({ deck_id: req.params.deckId });
+    const cardsObj = cards.map(c => {
+      const o = c.toObject();
+      o.id = o._id.toString();
+      return o;
+    });
+    res.json(cardsObj);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
 exports.createCard = async (req, res) => {
-  const { front, back } = req.body;
+  const { front, back, difficulty } = req.body;
   try {
-    const [result] = await pool.query('INSERT INTO cards (deck_id, front, back) VALUES (?, ?, ?)', [req.params.deckId, front, back]);
-    res.status(201).json({ id: result.insertId, deck_id: req.params.deckId, front, back });
+    // Ensure deck exists
+    const deck = await Deck.findById(req.params.deckId);
+    if (!deck) return res.status(404).json({ message: 'Deck not found' });
+
+    const card = new Card({ deck_id: req.params.deckId, front, back, difficulty: difficulty || 'medium' });
+    await card.save();
+    const cardObj = card.toObject();
+    cardObj.id = cardObj._id.toString();
+    res.status(201).json(cardObj);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
 exports.updateCard = async (req, res) => {
-  const { front, back } = req.body;
+  const { front, back, difficulty } = req.body;
   try {
-    const [result] = await pool.query('UPDATE cards SET front = ?, back = ? WHERE id = ?', [front, back, req.params.cardId]);
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ message: 'Card not found' });
-    }
-    res.json({ id: req.params.cardId, deck_id: req.params.deckId, front, back });
+    const card = await Card.findByIdAndUpdate(req.params.cardId, { front, back, difficulty: difficulty || 'medium' }, { new: true });
+    if (!card) return res.status(404).json({ message: 'Card not found' });
+    const cardObj = card.toObject();
+    cardObj.id = cardObj._id.toString();
+    res.json(cardObj);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -34,10 +46,8 @@ exports.updateCard = async (req, res) => {
 
 exports.deleteCard = async (req, res) => {
   try {
-    const [result] = await pool.query('DELETE FROM cards WHERE id = ?', [req.params.cardId]);
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ message: 'Card not found' });
-    }
+    const card = await Card.findByIdAndDelete(req.params.cardId);
+    if (!card) return res.status(404).json({ message: 'Card not found' });
     res.json({ message: 'Card deleted successfully' });
   } catch (error) {
     res.status(500).json({ message: error.message });
