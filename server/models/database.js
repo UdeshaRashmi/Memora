@@ -27,40 +27,19 @@ const initializeDatabase = async () => {
 // Schemas
 const Schema = mongoose.Schema;
 
+const UserSchema = new Schema({
+  name: { type: String, required: true },
+  email: { type: String, required: true, unique: true },
+  password: { type: String, required: true }
+}, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
+
 const DeckSchema = new Schema({
   title: { type: String, required: true },
   description: { type: String, default: '' },
-  user_id: { type: Number, required: true },
+  user_id: { type: Schema.Types.ObjectId, ref: 'User', required: true },
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
-const CardSchema = new Schema({
-  deck_id: { type: Schema.Types.ObjectId, ref: 'Deck', required: true },
-  front: { type: String, required: true },
-  back: { type: String, required: true },
-  difficulty: { type: String, default: 'medium' }
-}, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
-
-const StudySessionSchema = new Schema({
-  user_id: { type: Number, required: true },
-  deck_id: { type: Schema.Types.ObjectId, ref: 'Deck', required: true },
-  cards_studied: { type: Number, required: true },
-  total_cards: { type: Number, required: true },
-  duration: { type: Number, required: true },
-  completed: { type: Boolean, default: false }
-}, { timestamps: { createdAt: 'created_at' } });
-
-const AchievementSchema = new Schema({
-  user_id: { type: Number, required: true },
-  achievement_type: { type: String, required: true },
-  title: { type: String, required: true },
-  description: { type: String },
-  icon: { type: String },
-  points: { type: Number, default: 0 }
-}, { timestamps: { createdAt: 'unlocked_at' } });
-
+const User = mongoose.models.User || mongoose.model('User', UserSchema);
 const Deck = mongoose.models.Deck || mongoose.model('Deck', DeckSchema);
-const Card = mongoose.models.Card || mongoose.model('Card', CardSchema);
-const StudySession = mongoose.models.StudySession || mongoose.model('StudySession', StudySessionSchema);
-const Achievement = mongoose.models.Achievement || mongoose.model('Achievement', AchievementSchema);
 
-module.exports = { initializeDatabase, Deck, Card, StudySession, Achievement, mongoose };
+module.exports = { initializeDatabase, User, Deck, mongoose };
