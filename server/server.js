@@ -13,7 +13,7 @@ app.use(express.json());
 
 // Middleware to set user ID (placeholder - would come from auth in production)
 app.use((req, res, next) => {
-  req.userId = 1;
+  req.userId = req.headers['x-user-id'] || null;
   next();
 });
 
